@@ -1,109 +1,127 @@
-﻿
+function Speak($msg)
+{
+    $speak.speak($msg)
+}
 Clear-Host
 Add-Type -AssemblyName System.speech
 $speak = New-Object System.Speech.Synthesis.SpeechSynthesizer
-$waitSeconds = 15
-$flag = 0
-
-$city_id=0
-
-if($null -eq $city_id -or $city_id -eq 0)
+$msg=""
+$flag = 1
+$districtid=0
+Clear-Host
+if($null -eq $districtid -or $districtid -eq 0)
 {
-    $speak.Speak("Enter your city name")
-    $city=read-host "Enter your city name"
-
-
+    $msg="Enter your district name="
+    speak $msg.split('=')[0]
+    Write-Host $msg -NoNewline
+    $district=read-host
     $execution=$true
-    $city_range=1
+    $stateid=1
     do
     {
-        $uri = "https://cdn-api.co-vin.in/api/v2/admin/location/districts/$city_range" 
-        $webData = Invoke-RestMethod -Uri $uri
-        if($webdata.districts -match $city)
+        try
         {
-            $execution=$false
-            $city_id=($webdata.districts -match $city).district_id
-            $msg="City $city found in the list with district code as $city_id"
-            write-host $msg
-            $speak.Speak($msg)
-            break
-
+            $uri = "https://cdn-api.co-vin.in/api/v2/admin/location/districts/$stateid" 
+            $webData = Invoke-RestMethod -Uri $uri
+            if($webdata.districts -match $district)
+            {
+                $execution=$false
+                $districtid=($webdata.districts -match $district).district_id
+                if($districtid)
+                {
+                    $msg="District $district found in the list with below district code:"
+                    write-host $msg
+                    ""
+                    $districtid
+                    ""
+                    speak $msg
+                    speak $districtid
+                    break
+                }
+            }
+            $webdata=$uri=$null
+            $stateid++
         }
-        $webdata=$uri=$null
-        $city_range++
-    }while($execution -and $city_range -lt 40)
+        catch
+        {
+            write-host "Error received `n $_"
+            break
+        } 
+    }while($execution -and $stateid -lt 40)
  }
-
-
-$speak.Speak("Please enter desired slot date in format of dd-mm-yyyy")  
-$date = Read-Host "Please enter desired slot date (dd-mm-yyyy)"#"06-05-2021"
-
-
-do
+if($districtid)
 {
-    $speak.Speak("Please enter age group")
-    [int]$minAgeLimit = Read-Host "Please enter age group (18 or 45)" # 18 or 45
-}
-while($minAgeLimit.GetType().Name -ne 'Int32' -or $minAgeLimit -notin(18,45))
+    $msg="Please enter desired slot date in format of dd-mm-yyyy="
+    speak $msg.split('=')[0]
+    write-host $msg -NoNewline
+    $date = Read-Host
 
-#$city_id= Read-Host "Please enter district id (default is Mumbai)"
-if($city_id -eq '')
+    do
+    {
+        $msg="Please enter minimum age limit="
+        speak $msg.split('=')[0]
+        Write-Host $msg -NoNewline
+        [int]$minAgeLimit = Read-Host # 18 or 45
+    }
+    while($minAgeLimit.GetType().Name -ne 'Int32')
+
+    if($districtid -eq '')
+    {
+        $districtid = 395 # default value
+    }
+    try
+    {
+        do
+        {
+        $uri = "https://cdn-api.co-vin.in/api/v2/appointment/sessions/public/findByDistrict?district_id=$districtid&date=$date"
+        $webData = Invoke-RestMethod -Uri $uri
+        $dataCount = 0
+        $sr=0
+        $blocklist=@()
+        if($null -ne $webData.sessions -and $webData.sessions.Count -gt 0)
+        {
+            foreach($session in $webData.sessions)
+            {
+                if($null -eq $session.min_age_limit -OR $session.min_age_limit -lt $minAgeLimit)
+                {
+                    $list=[PSCustomObject]@{
+                        'Sr No' = $sr++
+                        'Name'=$($session.name)
+                        'Address'=$($session.Address)
+                        'Vaccine'=$($session.Vaccine)
+                        'Pincode'=$($session.pincode)
+                        'Available Capacity'=$($session.available_capacity)
+                    }
+                    $blocklist+=$list
+                    $dataCount++
+                }          
+            }
+            
+        }
+        
+        if($dataCount -eq 0)
+        {
+            Write-Host "No slot available." -ForegroundColor White -BackgroundColor Red
+            $speak.Speak("No slot available.")
+        }
+        else
+        {
+            $msg = "Please find the vaccine availability details."
+            $speak.Speak($msg)
+            $finallist=$blocklist | Format-Table
+            #$finallist | ForEach-Object { write-host $_ -ForegroundColor Green}
+            $finallist
+            [console]::beep(3000,500)
+        }
+        }while($flag -eq 0)
+    }
+    catch{
+        write-error "An Error Occurred."
+    }
+}
+else 
 {
-	$city_id = 395 # default value
-}
-
-try
-{
-	do
-	{
-	$currentTime = Get-Date -Format "dd/MMM/yyyy HH:mm:ss"
-	$uri = "https://cdn-api.co-vin.in/api/v2/appointment/sessions/public/findByDistrict?district_id=$city_id&date=$date"
-	$webData = Invoke-RestMethod -Uri $uri
-	$dataCount = 0
-    $sr=0
-
-	if($null -ne $webData.sessions -and $webData.sessions.Count -gt 0)
-	{
-        write-host "-----------------------------------------------------------------------------------------------"
-		foreach($session in $webData.sessions)
-		{
-			if($null -eq $session.min_age_limit -OR $session.min_age_limit -le $minAgeLimit)
-			{
-                $sr++
-				write-host "$sr. Block: "$session.block_name",			Pin Code: "$session.pincode",	" -nonewline        
-				write-host "Available: "$session.available_capacity -ForegroundColor White -BackgroundColor DarkGreen
-                $Phrase = "Vaccine available at $($session.block_name) with pin code $($session.pincode) having capacity of $($session.available_capacity)"
-                $speak.Speak($Phrase)
-				$dataCount = $dataCount + 1        
-			}          
-		}
-        write-host "-----------------------------------------------------------------------------------------------"
-	}
-
-	if($dataCount -eq 0)
-	{
-		Write-Host "No slot available." -ForegroundColor White -BackgroundColor Red
-        $speak.Speak("No slot available.")
-	}
-	else
-	{
-		[console]::beep(3000,500)
-	}
-
-#mumbai 395
-#Delhi 146
-#Goa 151
-#Pune 363
-#Jaipur 505
-
-
-	Write-Host
-	Write-Host "LastRefresh: $currentTime, Age Group: $minAgeLimit Years, Next Refresh In: $waitSeconds Seconds" -ForegroundColor Yellow
-	Write-Host "---------------------------------------------------------"
-	Start-Sleep -s $waitSeconds
-	}while($flag -eq 0)
-
-}
-catch{
-	write-error "An Error Occurred."
+     $msg="No District ID found for $district district." 
+     write-host $msg -ForegroundColor White -BackgroundColor Red
+     speak $msg
 }
